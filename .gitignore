@@ -1,0 +1,4 @@
+*.aux
+*.log
+.ipynb_checkpoints/
+.python-version

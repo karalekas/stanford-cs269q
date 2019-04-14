@@ -1,0 +1,5 @@
+#!/bin/bash
+
+/src/qvm/qvm -S &
+
+exec "$@"
