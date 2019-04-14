@@ -1,6 +1,8 @@
 stanford-cs269q
 ===============
 
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/karalekas/stanford-cs269q/master?filepath=Lecture4.ipynb)
+
 Binder repository that contains the Jupyter notebook for my [CS 269Q](https://cs269q.stanford.edu/)
 guest lecture on "Programming a quantum algorithm with pyQuil", offered at Stanford in Spring 2019.
 
