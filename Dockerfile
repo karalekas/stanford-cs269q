@@ -44,4 +44,4 @@ EXPOSE 8888
 # use a start script to add startup commands (qvm server spinup)
 WORKDIR ${HOME}
 ENTRYPOINT ["./start"]
-CMD ["jupyter", "notebook", "--ip=0.0.0.0", "Lecture4.ipynb"]
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "Lecture4.ipynb"]
