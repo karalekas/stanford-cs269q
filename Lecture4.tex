@@ -1,27 +1,39 @@
 \documentclass[12pt, letterpaper]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[margin=1in]{geometry}
-\usepackage[hang,small,bf]{caption}
+\usepackage{abstract}
 \usepackage{amsmath}
 \usepackage{amssymb}
-\usepackage{tikz}
 \usepackage{braket}
-\usetikzlibrary{backgrounds,shadows.blur,fit,decorations.pathreplacing,shapes}
-
+\usepackage[hang,small,bf]{caption}
+\usepackage[margin=1in]{geometry}
 \usepackage{graphicx}
+\usepackage[utf8]{inputenc}
+\usepackage{tikz}
+\usetikzlibrary{
+backgrounds,
+shadows.blur,
+fit,
+decorations.pathreplacing,
+shapes}
 \usepackage[frame,line,arrow,matrix,tips]{xy}	% all that is usually necessary
 
-\setlength{\topmargin}{0.0in}		% 1in top margin
-\setlength{\textwidth}{6.25in}		% 6.0in text - 1.25in rt margin
-\setlength{\textheight}{8.6in}		% Body ht for 1in margins
-\addtolength{\topmargin}{-\headheight}	% No header, so compensate
-\addtolength{\topmargin}{-\headsep}	% for header height and separation
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\usepackage{abstract}
 \renewcommand{\abstractname}{}    % clear the title
 \renewcommand{\absnamepos}{empty} % originally center
+
+% qasm2circ definitions
+\def\w{\ar@{-}[l]}
+\def\A#1{\save []="#1" \restore}
+\def\op#1{*+[F]{\rule[-0.2ex]{0ex}{2.1ex}#1}}	% operator in box
+\def\b{*={\bullet}}
+\def\o{*={\oplus}}
+\def\m#1{\left[\matrix{#1}\right]}		% matrix shortcut
+\def\z{*+[]{\rule[-0.2ex]{0ex}{2.1ex}~|0\>}}	% re-init to |0>
+\def\discard{*[]{\rule[-0.2ex]{0.75pt}{2.1ex}~}}	% vertical ``|''
+\def\n{*-{}\w}
+\def\>{\rangle}
+\def\<{\langle}
+\def\ua{\uparrow}
+\def\q#1{*+{\rule[-0.2ex]{0ex}{2.1ex}|#1\>}}
+\def\qv#1#2{*+{\rule[-0.2ex]{0ex}{2.1ex}|#1\>=|#2\>}}
 
 \title{CS 269Q Lecture 4 \\ \large Programming a quantum algorithm with pyQuil\vspace{-1ex}}
 \author{Peter Karalekas \\ \small peter@rigetti.com}
@@ -35,178 +47,117 @@
 We build out our quantum computing toolbox so that we can implement our very first quantum algorithm. We begin by working through a couple foundational concepts—the wavefunction, classical logic, and quantum parallelism—and then conclude with a walkthrough of the protocol for Deutsch's algorithm. Alongside these notes, there is a Jupyter notebook that uses Rigetti Computing's open-source software development kit, called Forest, to step through the algorithm and inspect the wavefunction.
 \end{abstract}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% wires
-
-\def\w{\ar@{-}[l]}
-\def\W{\ar@{=}[l]}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% labels
-
-% simple label
-\def\A#1{\save []="#1" \restore}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% single qubit operations
-
-\def\op#1{*+[F]{\rule[-0.2ex]{0ex}{2.1ex}#1}}	% operator in box
-\def\b{*={\bullet}}
-\def\o{*={\oplus}}
-\def\t{*={\times}}				% for swap gate
-\def\sq{*=<6pt,6pt>[F]{}}			% square, for controlled-phase
-\def\m#1{\left[\matrix{#1}\right]}		% matrix shortcut
-\def\z{*+[]{\rule[-0.2ex]{0ex}{2.1ex}~|0\>}}	% re-init to |0>
-\def\discard{*[]{\rule[-0.2ex]{0.75pt}{2.1ex}~}}	% vertical ``|''
-\def\slash{*={/}}				% slash for wire bundles
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% nop's
-
-\def\N{*-{}\W}
-\def\n{*-{}\w}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% misc definitions
-
-\def\>{\rangle}
-\def\<{\langle}
-\def\ua{\uparrow}
-
-% measurement box
-\def\meter{*+[]{\put(-3,0){\includegraphics[scale=.5]{meter.epsf}}~~~~}%
-		\ar@{-}[l]}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% qubit names (and also revert to qubit wires, vs, cbit wires)
-
-\def\q#1{*+{\rule[-0.2ex]{0ex}{2.1ex}|#1\>}}
-\def\qv#1#2{*+{\rule[-0.2ex]{0ex}{2.1ex}|#1\>=|#2\>}}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% multiple qubit gates
-
-% utulity text box for figuring out width of things
-\newbox{\sbox}
-
-% empty space of width determined by the text argument
-\def\gspace#1{*+{\rule[-0.2ex]{0ex}{2.1ex}%
-	\setbox\sbox=\hbox{$#1$}%
-	\hspace*{\wd\sbox}}}
-
-% n-qubit operation #1=box label, #2=number of qubits (eg d=2 qubits, ddd=4)
-\def\gnqubit#1#2{\gspace{#1}
-		 \save [].[#2]!C="qq"*[F]\frm{}\restore
-		 \save "qq"*[]{#1} \restore}
-
-% two-qubit operation
-\def\gtwo#1{\gnqubit{#1}{d}}
-
-% two-qubit operation
-\def\gthree#1{\gnqubit{#1}{dd}}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\section{The wavefunction \& quantum circuits}
+\section{The wavefunction and quantum circuits}
 
 We represent the state of our qubit using the ``ket" $\ket{\psi}$, which is a superposition of the states $\ket{0}$ and $\ket{1}$ that form a
-basis for a two-dimensional complex vector space ($\mathbb{C}^2$). We additionally have a normalization condition on our complex amplitudes $\alpha$ and $\beta$ such that their magnitudes must sum to 1.
+basis for a two-dimensional complex vector space ($\mathbb{C}^2$). We additionally have a normalization condition on our complex amplitudes $\alpha$ and $\beta$ such that their magnitudes squared must sum to 1.
 
-$$\ket{\psi} = \alpha \ket{0} + \beta \ket{1} \hspace{1 cm} \alpha^2 + \beta^2 = 1$$
+\begin{equation}
+\ket{\psi} = \alpha \ket{0} + \beta \ket{1} \hspace{1 cm} |\alpha|^2 + |\beta|^2 = 1
+\end{equation}
 
 \subsection{1Q states}
 
 For our quantum virtual machine (QVM), each qubit begins in the $|\psi\rangle = |0\rangle$ state. We then apply quantum gates to evolve the state of the QVM, and each gate $U$ must be unitary, meaning that $U^{\dag}U = I$. We can use an $X$ gate to flip between $|0\rangle$ and $|1\rangle$.
 
-$$X|0\rangle = |1\rangle \hspace{1 cm} X|1\rangle = |0\rangle \vspace{3 mm}$$
+\begin{equation}
+X|0\rangle = |1\rangle \hspace{1 cm} X|1\rangle = |0\rangle \vspace{3 mm}
+\end{equation}
 
 \noindent
 In addition to swapping between the 1Q computational basis states, we can use quantum gates to create superposition states. Here we create the 1Q superposition states $|+\rangle$ amd $|-\rangle$ using the $H$ (Hadamard) gate.\vspace{2 mm}
 
-$$H|0\rangle = \dfrac{|0\rangle + |1\rangle}{\sqrt{2}} = |+\rangle \hspace{1 cm} H|1\rangle = \dfrac{|0\rangle - |1\rangle}{\sqrt{2}} = |-\rangle$$
+\begin{equation}
+H|0\rangle = \dfrac{|0\rangle + |1\rangle}{\sqrt{2}} = |+\rangle \hspace{1 cm} H|1\rangle = \dfrac{|0\rangle - |1\rangle}{\sqrt{2}} = |-\rangle
+\end{equation}
 
 \subsection{2Q states}
 
 For two-qubit states, we can create ``product states" of computational basis states, which just look like two-bit bitstrings. Here we create the 2Q computational basis state $|10\rangle$.
 
-$$(X \otimes I)|00\rangle = |10\rangle \vspace{3 mm}$$
+\begin{equation}
+(X \otimes I)|00\rangle = |10\rangle \vspace{3 mm}
+\end{equation}
 
 \noindent
-We can also create product states of superposition states. Here we create the 2Q superposition state $|+,+\rangle$ using two Hadamard gates.
+We can also create product states of superposition states. Here we create the 2Q superposition state $|+,+\rangle$ using two Hadamard gates.\vspace{2 mm}
 
-$$(H \otimes H)|00\rangle = \left[ \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right] \otimes \left[ \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right] = |+,+\rangle \vspace{3 mm}$$
+\begin{equation}
+(H \otimes H)|00\rangle = \left( \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right) \otimes \left( \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right) = |+,+\rangle \vspace{4 mm}
+\end{equation}
 
 \noindent
 In addition to product states, we can create entangled states, which we can no longer factor into the tensor product of two individual qubit states. Here we create the Bell state $|\Phi^+\rangle$.
 
-$$\text{CNOT}_{0,1}(I \otimes H)|00\rangle = \text{CNOT}_{0,1}|0\rangle \otimes \left[ \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right] = \dfrac{|00\rangle + |11\rangle}{\sqrt{2}} = |\Phi^+\rangle$$
+\vspace{2 mm}
+\begin{equation}
+\text{CNOT}_{0,1}(I \otimes H)|00\rangle = \text{CNOT}_{0,1}|0\rangle \otimes \left( \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right) = \dfrac{|00\rangle + |11\rangle}{\sqrt{2}} = |\Phi^+\rangle
+\end{equation}
 
-\section{Classical logic \& function evaluation}
+\section{Classical logic and function evaluation}
 
 In Computer Science, we learn about Boolean logic gates like \texttt{NOT},
 \texttt{AND}, \texttt{OR}, and \texttt{XOR}. In quantum computing, we can implement these classical logic gates, but we must do so in a way that respects the unitarity requirements of quantum logic gates.
 
 \subsection{Boolean functions of 1-bit domain}
+\vspace{2 mm}
 
-$$x \in \{0,1\} \hspace{1cm} f(x) \rightarrow \{0,1\} \vspace{1 mm}$$
+\begin{equation}
+x \in \{0,1\} \hspace{1cm} f(x) \rightarrow \{0,1\} \vspace{2 mm}
+\end{equation}
 
 \noindent
 One-bit boolean functions represent the simplest classical logic we can implement on a quantum computer. There are four possible one-bit functions $f(x)$, and we will work through all of them.
 
 \subsubsection{Balanced functions}
-
-$$\textbf{Balanced}\textrm{-}I : (0 \rightarrow 0,  1 \rightarrow 1)
+\vspace{2 mm}
+$$\text{Balanced-}I : (0 \rightarrow 0,  1 \rightarrow 1)
 \hspace{1 cm}
-\textbf{Balanced}\textrm{-}X : (0 \rightarrow 1,  1 \rightarrow 0) \vspace{1 mm}$$
+\text{Balanced-}X : (0 \rightarrow 1,  1 \rightarrow 0) \vspace{2 mm}$$
 
 \noindent
 For the balanced 1-bit functions, it’s pretty easy to come up with a quantum circuit that works. If we use just an $I$ gate for Balanced-$I$ and just an $X$ gate for Balanced-$X$, we can produce a quantum circuit $U_f$ that maps $|x\rangle \rightarrow |f(x)\rangle$. Knowing the gate and and output, we can reproduce the input, which means our circuit satisfies our reversibility requirements. Below, we have the quantum circuit for Balanced-$I$ on the left, and Balanced-$X$ on the right.
-\vspace{-1 mm}
 
+% the 1-qubit balanced circuits
 \def\gAxA{\op{X}\w\A{gAxA}}
-
-% definitions for bit labels and initial states
-
 \def\bA{ \q{x}}
-
-% The quantum circuit as an xymatrix
-
-$$\xymatrix@R=5pt@C=10pt{
-    \bA &\n  &\n  &\n  &\n &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+\begin{equation}
+\xymatrix@R=5pt@C=10pt{
+    \bA &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n
 }\hspace{1 cm}
 \xymatrix@R=5pt@C=10pt{
-    \bA & \gAxA &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
-}$$
+    \bA &\n &\n &\n &\gAxA &\n &\n &\n &\n
+}
+\end{equation}
 
 \subsubsection{Constant functions}
-
-$$\textbf{Constant}\textrm{-}0 : (0 \rightarrow 0,  1 \rightarrow 0)
-\hspace{1 cm}
-\textbf{Constant}\textrm{-}1 : (0 \rightarrow 1,  1 \rightarrow 1)$$
-
-\noindent
-Coming up with the circuit for the constant functions seems less trivial. We can write down a matrix that maps the 0 state to the 0 state and the 1 state to the 0 state.
-
-$$U \stackrel{?}{=} \left(\begin{matrix}
-    1 & 1 \\
-    0 & 0
-\end{matrix}\right) \vspace{2 mm}$$
-
-\noindent
-However, this matrix has some problems. It is not invertible (determinant 0) and it is not length preserving (superposition state changes length), and therefore it is not unitary. We can also see that it is not reversible simply from the truth table—knowing the output and the gate isn’t enough to get back to the input.
-
-$$\text{det}(U) = \text{det}\left(\begin{matrix}
-    1 & 1 \\
-    0 & 0
-\end{matrix}\right) = 1\cdot0 - 1\cdot0 = 0$$
 \vspace{2 mm}
-$$U|\psi\rangle = \left(\begin{matrix}
+$$\text{Constant-}0 : (0 \rightarrow 0,  1 \rightarrow 0)
+\hspace{1 cm}
+\text{Constant-}1 : (0 \rightarrow 1,  1 \rightarrow 1) \vspace{2 mm}$$
+
+\noindent
+Coming up with the circuit for the constant functions seems less trivial. We can write down a matrix $M_f$ that maps the 0 state to the 0 state and the 1 state to the 0 state.\vspace{1 mm}
+
+\begin{equation}
+M_f = \left(\begin{matrix}
+    1 & 1 \\
+    0 & 0
+\end{matrix}\right) \vspace{3 mm}
+\end{equation}
+
+\noindent
+However, this matrix has some problems. It is not invertible (determinant 0) and it is not length preserving (superposition state changes length), and therefore it is not unitary. We can also see that it is not reversible simply from the truth table—knowing the output and the gate isn’t enough to get back to the input.\vspace{1 mm}
+
+\begin{equation}
+\text{det}(M_f) = \text{det}\left(\begin{matrix}
+    1 & 1 \\
+    0 & 0
+\end{matrix}\right) = 1\cdot0 - 1\cdot0 = 0
+\end{equation}
+\vspace{3 mm}
+\begin{equation}
+M_f|\psi\rangle = \left(\begin{matrix}
     1 & 1 \\
     0 & 0
 \end{matrix}\right)
@@ -217,84 +168,60 @@ $$U|\psi\rangle = \left(\begin{matrix}
 \left(\begin{matrix}
     1.4 \\
     0.0
-\end{matrix}\right)$$
+\end{matrix}\right)
+\end{equation}
 
 \subsubsection{Ancilla qubits}
 
-In order to write this function as a quantum circuit, we need to introduce a new concept—the ancilla qubit. An ancilla qubit is an additional qubit used in a computation that we know the initial state of. Using an ancilla, we can produce a quantum circuit $U_f$ that maps $|0, x\rangle \rightarrow |f(x), x\rangle$. Now, we can come up with a unitary matrix (albeit a trivial one) that allows us to evaluate constant functions. For the Constant-$0$, we just simply do nothing to the ancilla, and its state encodes $f(x)$. And for the Constant-$1$, all we have to do is flip the ancilla with an $X$ gate, and we get $f(x)$ for all $x$.
+In order to write this function as a quantum circuit, we need to introduce a new concept—the ancilla qubit. An ancilla qubit is an additional qubit used in a computation that we know the initial state of. Using an ancilla, we can produce a quantum circuit $U_f$ that maps $|0, x\rangle \rightarrow |f(x), x\rangle$. Now, we can come up with a unitary matrix (albeit a trivial one) that allows us to evaluate constant functions. For the Constant-$0$, we just simply do nothing to the ancilla, and its state encodes $f(x)$. And for the Constant-$1$, all we have to do is flip the ancilla with an $X$ gate, and we get $f(x)$ for all $x$. Below, we have the Balanced-$I$ (top left), Balanced-$X$ (bottom left), Constant-$0$ (top right), and Constant-$1$ (bottom right) functions implemented as quantum circuits with one ancilla qubit. We will continue to use this ordering for sections 2.3 and 2.4.
 
-$$|0, x\rangle \rightarrow |f(x), x\rangle \vspace{3 mm}$$
+\begin{equation}
+|0, x\rangle \rightarrow |f(x), x\rangle
+\end{equation}
 
-\noindent
-Below, we have the Balanced-$I$ (top left), Balanced-$X$ (bottom left), Constant-$0$ (top right), and Constant-$1$ (bottom right) functions implemented as quantum circuits with one ancilla qubit. We will continue to use this ordering for sections 2.3 and 2.4.
-
+% ancilla qubit circuits
 \def\gAxB{\op{X}\w\A{gAxB}}
 \def\gBxA{\b\w\A{gBxA}}
 \def\gBxB{\o\w\A{gBxB}}
-
-% definitions for bit labels and initial states
-
 \def\bA{ \q{x}}
 \def\bB{ \q{0}}
-
-% The quantum circuit as an xymatrix
-
 $$
 \xymatrix@R=5pt@C=10pt{
-    \bA & \n  &\n&\n  &\n  &\n    &\n &\gBxA &\n
-\\  \bB & \n &\n &\n  &\n  &\n   &\n  &\gBxB &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\n &\n &\n &\n &\n &\n &\gBxA &\n &\n &\n
+\\  \bB &\n &\n &\n &\n &\n &\n &\n &\n &\n &\gBxB &\n &\n &\n
 \ar@{-}"gBxB";"gBxA"
 }\hspace{1 cm}
 \xymatrix@R=5pt@C=10pt{
-    \bA & \n   &\n &\n  &\n &\n &\n &\n &\n &\n    &\n
-\\  \bB & \n   &\n &\n  &\n &\n  &\n &\n  &\n  &\n  &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n
+\\  \bB &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n
 }$$
-
 $$
 \xymatrix@R=5pt@C=10pt{
-     \bA & \n   &\gBxA &\n
-\\  \bB & \gAxB &\gBxB &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\gBxA &\n &\n &\n
+\\  \bB &\n &\n &\gAxB &\gBxB &\n &\n &\n
 \ar@{-}"gBxB";"gBxA"
 }\hspace{1 cm}
 \xymatrix@R=5pt@C=10pt{
-    \bA &\n  & \n   &\n &\n
-\\  \bB &\n  & \gAxB &\n &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\n &\n &\n &\n &\n
+\\  \bB &\n &\n &\n &\gAxB &\n &\n &\n &\n
 }$$
 
 \subsection{The Quantum \texttt{XOR} gate}
 
-The Boolean function \texttt{XOR} (for "exclusive or") takes in two bits $x$ and $y$ and returns 1 if and only if the values of the bits are different from one another. Otherwise, it returns 0. The operation is written as $x \oplus y$, and although it is a two-bit function, we can implement it as a quantum circuit without an ancilla, by simply using the \textrm{CNOT} gate.
+The Boolean function \texttt{XOR} (for ``exclusive or") takes in two bits $x$ and $y$ and returns 1 if and only if the values of the bits are different from one another. Otherwise, it returns 0. The operation is written as $x \oplus y$, and although it is a two-bit function, we can implement it as a quantum circuit without an ancilla, by simply using the \textrm{CNOT} gate.
 
-$$\textrm{CNOT}_{0,1}|y, x\rangle = |y \oplus x, x\rangle$$
+\begin{equation}
+\textrm{CNOT}_{0,1}|y, x\rangle = |y \oplus x, x\rangle
+\end{equation}
 
+% xor circuit
 \def\gAxA{\b\w\A{gAxA}}
 \def\gAxB{\o\w\A{gAxB}}
-
-% definitions for bit labels and initial states
-
 \def\bA{ \q{x}}
 \def\bB{ \q{0}}
-
-% The quantum circuit as an xymatrix
-
 $$\xymatrix@R=5pt@C=10pt{
-    \bA & \gAxA &\n
-\\  \bB & \gAxB &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\gAxA &\n &\n &\n
+\\  \bB &\n &\n &\gAxB &\n &\n &\n
 \ar@{-}"gAxB";"gAxA"
 }$$
 
@@ -302,10 +229,11 @@ $$\xymatrix@R=5pt@C=10pt{
 
 In Deutsch's algorithm, we are given something called an oracle (referred to as $U_f$), which maps $|y, x\rangle \rightarrow |y \oplus f(x), x\rangle$, and the goal is to determine a global property of the function $f(x)$ with as few queries to the oracle as possible. We can combine the two concepts above (one-bit function evaluation with ancillas, and the \texttt{XOR} gate), to produce the four implementations of the Deutsch Oracle with one ancilla qubit.
 
-$$U_f : |y, 0, x\rangle \rightarrow |y \oplus f(x), 0, x\rangle$$
+\begin{equation}
+U_f : |y, 0, x\rangle \rightarrow |y \oplus f(x), 0, x\rangle
+\end{equation}
 
-% definitions for the circuit elements
-
+% deutsch oracle circuit
 \def\gAxB{\op{X}\w\A{gAxB}}
 \def\gBxA{\b\w\A{gBxA}}
 \def\gBxB{\o\w\A{gBxB}}
@@ -314,129 +242,104 @@ $$U_f : |y, 0, x\rangle \rightarrow |y \oplus f(x), 0, x\rangle$$
 \def\gDxA{\b\w\A{gDxA}}
 \def\gDxB{\o\w\A{gDxB}}
 \def\gExB{\op{X}\w\A{gExB}}
-
-% definitions for bit labels and initial states
-
 \def\bA{ \q{x}}
 \def\bB{ \q{0}}
 \def\bC{ \q{y}}
-
-% The quantum circuit as an xymatrix
-
 $$\xymatrix@R=5pt@C=10pt{
-    \bA & \n &\n & \n & \n & \n & \n  &\gBxA &\n   &\gDxA &\n  & \n &\n & \n &\n & \n &\n
-\\  \bB & \n &\n & \n & \n & \n & \n &\gBxB &\gCxB &\gDxB & \n & \n &\n & \n &\n & \n &\n
-\\  \bC & \n &\n & \n & \n & \n & \n  &\n   &\gCxC &\n   &\n  & \n &\n & \n &\n & \n &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\n &\n &\n &\gBxA &\n &\gDxA &\n &\n &\n &\n &\n &\n &\n
+\\  \bB &\n &\n &\n &\n &\n &\n &\gBxB &\gCxB &\gDxB &\n &\n &\n &\n &\n &\n &\n
+\\  \bC &\n &\n &\n &\n &\n &\n &\n &\gCxC &\n &\n &\n &\n &\n &\n &\n &\n
 \ar@{-}"gBxB";"gBxA"
 \ar@{-}"gCxC";"gCxB"
 \ar@{-}"gDxB";"gDxA"
 }\hspace{1 cm}
 \xymatrix@R=5pt@C=10pt{
-    \bA & \n &\n & \n & \n & \n & \n & \n  & \n & \n & \n &\n   & \n & \n & \n &\n  & \n &\n & \n &\n & \n &\n
-\\  \bB & \n &\n & \n & \n & \n & \n & \n & \n & \n & \n &\gCxB & \n & \n & \n \n & \n & \n &\n & \n &\n & \n &\n
-\\  \bC & \n &\n & \n & \n & \n & \n & \n  & \n & \n &\n   &\gCxC & \n &\n  & \n &\n  & \n &\n & \n &\n & \n &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n & \n &\n &\n &\n
+\\  \bB &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\gCxB &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n
+\\  \bC &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\gCxC &\n &\n &\n &\n &\n &\n & \n &\n &\n &\n
 \ar@{-}"gCxC";"gCxB"
 }$$
-
 $$\xymatrix@R=5pt@C=10pt{
-    \bA & \n   &\gBxA &\n   &\gDxA &\n   &\n
-\\  \bB & \gAxB &\gBxB &\gCxB &\gDxB &\gExB &\n
-\\  \bC & \n   &\n   &\gCxC &\n   &\n   &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\gBxA &\n &\gDxA &\n &\n
+\\  \bB &\gAxB &\gBxB &\gCxB &\gDxB &\gExB &\n
+\\  \bC &\n &\n &\gCxC &\n &\n &\n
 \ar@{-}"gBxB";"gBxA"
 \ar@{-}"gCxC";"gCxB"
 \ar@{-}"gDxB";"gDxA"
 }\hspace{1 cm}
 \xymatrix@R=5pt@C=10pt{
-    \bA & \n & \n & \n  & \n & \n & \n &\n & \n &\n  & \n &\n & \n &\n & \n &\n
-\\  \bB & \gAxB & \n & \n & \n &\gCxB & \n & \n & \n \n & \n & \n &\n & \n &\n & \n &\n
-\\  \bC & \n & \n & \n &\n   &\gCxC & \n &\n  & \n &\n  & \n &\n & \n &\n & \n &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n
+\\  \bB &\gAxB &\n &\n &\n &\gCxB &\n &\n &\n &\gAxB &\n
+\\  \bC &\n &\n &\n &\n &\gCxC &\n &\n &\n &\n &\n
 \ar@{-}"gCxC";"gCxB"
 }$$
 
 \subsection{Optimized Deutsch Oracle}
 
-For pedagogical reasons, it is nice to separate out the three steps in the Deutsch Oracle—evaluate $f(x)$, calculate $y \oplus f(x)$, and then return the ancilla to $|0\rangle$—but in practice we always want to implement our circuits in as few gates as possible (this is especially important when running on a real, noisy quantum computer!). Below, we show how we can rewrite each of the four Deutsch Oracle implementations (which we call $U_f$) without the need for an ancilla qubit.
+For pedagogical reasons, it is nice to separate out the three steps in the Deutsch Oracle—evaluate $f(x)$, calculate $y \oplus f(x)$, and then return the ancilla to $|0\rangle$. But, in practice we always want to implement our circuits in as few gates as possible (this is especially important when running on a real, noisy quantum computer!). Below, we show how we can rewrite each of the four Deutsch Oracle implementations (which we call $U_f$) without the need for an ancilla qubit.
 
-$$U_f : |y, x\rangle \rightarrow |y \oplus f(x), x\rangle$$
+\vspace{20 mm}
+\begin{equation}
+U_f : |y, x\rangle \rightarrow |y \oplus f(x), x\rangle
+\end{equation}
 
+% optimized deutsch oracle circuits
 \def\gAxA{\op{X}\w\A{gAxA}}
 \def\gBxA{\b\w\A{gBxA}}
 \def\gBxB{\o\w\A{gBxB}}
 \def\gCxA{\op{X}\w\A{gCxA}}
-
-% definitions for bit labels and initial states
-
 \def\bA{ \q{x}}
 \def\bB{ \q{y}}
-
-% The quantum circuit as an xymatrix
-
 $$\xymatrix@R=5pt@C=10pt{
-    \bA   & \n & \n & \n & \n & \n & \n &\gBxA  & \n &\n & \n & \n &\n   & \n  & \n  & \n
-\\  \bB  & \n & \n  & \n & \n & \n & \n   &\gBxB  & \n &\n   &\n  & \n & \n & \n  & \n  & \n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\n &\n &\n &\gBxA &\n &\n &\n &\n &\n &\n &\n &\n
+\\  \bB &\n &\n &\n &\n &\n &\n &\gBxB &\n &\n &\n &\n &\n &\n &\n &\n
 \ar@{-}"gBxB";"gBxA"
 }\hspace{1 cm}
 \xymatrix@R=5pt@C=10pt{
-    \bA   & \n & \n & \n & \n & \n & \n & \n & \n & \n  & \n &\n & \n & \n &\n   & \n  & \n  & \n
-\\  \bB  & \n & \n  & \n & \n & \n & \n   & \n & \n & \n  & \n &\n   &\n  & \n & \n & \n  & \n  & \n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n
+\\  \bB &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n
 }$$
-
 $$\xymatrix@R=5pt@C=10pt{
-    \bA & \gAxA &\gBxA &\gCxA &\n
-\\  \bB & \n   &\gBxB &\n   &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\gAxA &\gBxA &\gCxA &\n
+\\  \bB &\n &\gBxB &\n &\n
 \ar@{-}"gBxB";"gBxA"
 }\hspace{1 cm}
 \xymatrix@R=5pt@C=10pt{
-    \bA   & \n & \n & \n & \n & \n &\n & \n & \n &\n   & \n  & \n  & \n
-\\  \bB  & \n & \n  & \n & \n   & \n & \gAxA &\n   &\n & \n & \n  & \n  & \n
-%
-% Vertical lines and other post-xymatrix latex
-%
+    \bA &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n &\n
+\\  \bB &\n &\n &\n &\n &\n &\gAxA &\n &\n &\n &\n &\n &\n
 }$$
 
 \section{Quantum parallelism}
 
 In the previous section, we showed that we could implement classical logic using quantum circuits. However, when using a computational basis state ($|0\rangle$ or $|1\rangle$), we don't do anything more interesting than a classical computer can do. If we instead feed a superposition state into one of these circuits, we can effectively evaluate a function $f(x)$ on multiple values of $x$ at once!
 
-$$U_f : |0,+\rangle \rightarrow \dfrac{|f(0), 0\rangle + |f(1), 1\rangle}{\sqrt{2}}$$
-\vspace{3 mm}
-$$U_f : |0,-\rangle \rightarrow \dfrac{|f(0), 0\rangle - |f(1), 1\rangle}{\sqrt{2}}$$
+\begin{equation}
+U_f : |0,+\rangle \rightarrow \dfrac{|f(0), 0\rangle + |f(1), 1\rangle}{\sqrt{2}}
+\end{equation}
+\vspace{1 mm}
+
+\begin{equation}
+U_f : |0,-\rangle \rightarrow \dfrac{|f(0), 0\rangle - |f(1), 1\rangle}{\sqrt{2}}
+\end{equation}
 \vspace{1 mm}
 
 \noindent
-It is important to note, that although this quantum parallelism concept is interesting, we are unable to learn about both $f(0)$ and $f(1)$ when the states above are in that form. This is due to the fact that we can only extract one classical bit's worth of information from a quantum computer (of 1 qubit) when we measure it. But, as we will find in Deutsch's algorithm below, we can cleverly take advantage of quantum parallelism to do things that a classical computer cannot, even with the constraint that measurement yields only one classical bit.
+It is important to note, that although this quantum parallelism concept is interesting, we are unable to learn about both $f(0)$ and $f(1)$ when the states above are in that form. This is due to the fact that we can only extract one classical bit of information from a quantum computer (of 1 qubit) when we measure it. But, as we will find in Deutsch's algorithm below, we can cleverly take advantage of quantum parallelism to do things that a classical computer cannot, even with the constraint that measurement yields only one classical bit.
 
 \subsection{Test with Balanced-$I$}
 
 To verify, we run the Balanced-$I$ circuit for an input that is in a superposition state.
 
+\vspace{2 mm}
+\begin{equation}
+\text{CNOT}_{0,1}|0,+\rangle = \dfrac{\text{CNOT}_{0,1}|00\rangle + \text{CNOT}_{0,1}|01\rangle}{\sqrt{2}} = \dfrac{|00\rangle + |11\rangle}{\sqrt{2}} = |\Phi^+\rangle
+\end{equation}
 \vspace{1 mm}
-$$\text{CNOT}_{0,1}|0,+\rangle = \dfrac{\text{CNOT}_{0,1}|00\rangle + \text{CNOT}_{0,1}|01\rangle}{\sqrt{2}} = \dfrac{|00\rangle + |11\rangle}{\sqrt{2}} = |\Phi^+\rangle$$
-\vspace{-2 mm}
 
-$$\text{CNOT}_{0,1}|0,-\rangle = \dfrac{\text{CNOT}_{0,1}|00\rangle - \text{CNOT}_{0,1}|01\rangle}{\sqrt{2}} = \dfrac{|00\rangle - |11\rangle}{\sqrt{2}} = |\Phi^-\rangle$$
-\vspace{1 mm}
+\begin{equation}
+\text{CNOT}_{0,1}|0,-\rangle = \dfrac{\text{CNOT}_{0,1}|00\rangle - \text{CNOT}_{0,1}|01\rangle}{\sqrt{2}} = \dfrac{|00\rangle - |11\rangle}{\sqrt{2}} = |\Phi^-\rangle
+\end{equation}
+\vspace{2 mm}
 
 \noindent
 In both of our output states, we can see that if we take the state of qubit 0 in each ket to be $x$, the state of qubit 1 in the corresponding ket is equal to $f(x)$ (as $f(x) = x$ for Balanced-$I$).
@@ -445,87 +348,112 @@ In both of our output states, we can see that if we take the state of qubit 0 in
 
 \noindent
 \textbf{Goal}: Determine if function $f(x)$ is \textit{constant} ($f(0) = f(1)$) or \textit{balanced} ($f(0) \neq f(1)$).
-\vspace{2 mm}
 
-% definitions for the circuit elements
+\vspace{1 mm}
+{
+% utulity text box for figuring out width of things
+\newbox{\sbox}
+% empty space of width determined by the text argument
+\def\gspace#1{*+{\rule[-0.2ex]{0ex}{2.1ex}%
+	\setbox\sbox=\hbox{$#1$}%
+	\hspace*{\wd\sbox}
+	\hspace*{\wd\sbox}
+	\hspace*{\wd\sbox}}}
+% n-qubit operation #1=box label, #2=number of qubits (eg d=2 qubits, ddd=4)
+\def\gnqubit#1#2{\gspace{#1}
+		 \save [].[#2]!C="qq"*[F]\frm{}\restore
+		 \save "qq"*[]{#1} \restore}
 
+% deutsch's algorithm circuit
 \def\gAxA{\op{H}\w\A{gAxA}}
 \def\gAxB{\op{H}\w\A{gAxB}}
 \def\gBxA{\gnqubit{U_{f}}{d}\w\A{gBxA}}
 \def\gBxB{\gspace{U_{f}}\w\A{gBxB}}
 \def\gCxA{\op{H}\w\A{gCxA}}
 \def\gCxB{\op{H}\w\A{gCxB}}
-
-% definitions for bit labels and initial states
-
 \def\bA{ \q{0}}
 \def\bB{ \q{1}}
+\begin{equation}
+\begin{split}
+\xymatrix@R=5pt@C=10pt{
+    \bA &\n &\n &\gAxA &\n &\n &\gBxA &\n &\n &\gCxA &\n &\n &\n
+\\  \bB &\n &\n &\gAxB &\n &\n &\gBxB &\n &\n &\gCxB &\n &\n &\n
+}
+\end{split}
+\end{equation}
+}
 
-% The quantum circuit as an xymatrix
-
-$$\xymatrix@R=5pt@C=10pt{
-    \bA & \gAxA &\gBxA &\gCxA &\n
-\\  \bB & \gAxB &\gBxB &\gCxB &\n
-%
-% Vertical lines and other post-xymatrix latex
-%
-}$$
-
-\vspace{4 mm}
+\vspace{2 mm}
 
 \noindent
 As part of the algorithm, we are given a Deutsch Oracle and are unaware of which one-bit Boolean function $f(x)$ it implements. We show that we can do this with only one query to the Deutsch Oracle, which is impossible on a classical computer, which would require two queries to the Deutsch Oracle to determine this global property of $f(x)$.
 
 \subsection{Initial state}
 
-We begin our algorithm in the computational basis state $|10\rangle$. The fact that the states for qubit 0 and qubit 1 are different proves to be important in the algorithm.
+We begin our algorithm in the computational basis state $|10\rangle$. The fact that the states for qubit 0 and qubit 1 are different proves to be important.
 
-$$|\psi_0\rangle = |10\rangle$$
+\begin{equation}
+|\psi_0\rangle = |10\rangle
+\end{equation}
 
 \subsection{Prepare superpositions}
 
-We cannot do anything interesting with computational basis states, so to take advantage of quantum parallelism we put our qubits in superposition states.
+We cannot do anything interesting with computational basis states, so to take advantage of quantum parallelism we put our qubits in superposition states.\vspace{1 mm}
 
-$$|\psi_1\rangle = (H \otimes H)|\psi_0\rangle = (H \otimes H)|10\rangle = \left[ \dfrac{|0\rangle - |1\rangle}{\sqrt{2}}\right] \otimes \left[ \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right] = |-,+\rangle$$
+\begin{equation}
+|\psi_1\rangle = (H \otimes H)|\psi_0\rangle = (H \otimes H)|10\rangle = \left( \dfrac{|0\rangle - |1\rangle}{\sqrt{2}}\right) \otimes \left( \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right) = |-,+\rangle \vspace{1 mm}
+\end{equation}
 
 \subsection{Apply the Deutsch Oracle}
 
 We learned earlier that the action of the Deutsch Oracle on input state $|y,x\rangle$ is $U_f|y, x\rangle \rightarrow |y \oplus f(x), x\rangle$. So, what happens if we apply the Deutsch Oracle to the input state $|-,x\rangle$?
-\\
 
-$$U_f|-, x\rangle = \dfrac{U_f|0, x\rangle - U_f|1, x\rangle}{\sqrt{2}} =
-\dfrac{|0 \oplus f(x), x\rangle - |1 \oplus f(x), x\rangle}{\sqrt{2}}$$
-
-$$\dfrac{|0 \oplus f(x), x\rangle - |1 \oplus f(x), x\rangle}{\sqrt{2}} =
-\begin{cases}
-   \dfrac{|0, x\rangle - |1, x\rangle}{\sqrt{2}}  = (+1)|-,x\rangle \text{ if } f(x) = 0\\
-   \dfrac{|1, x\rangle - |0, x\rangle}{\sqrt{2}}  = (-1)|-,x\rangle \text{ if } f(x) = 1
-\end{cases}$$
+\begin{equation}
+\begin{split}
+U_f|-, x\rangle
+&= \dfrac{U_f|0, x\rangle - U_f|1, x\rangle}{\sqrt{2}} \\
+\vspace{1 mm}\\
+&= \dfrac{|0 \oplus f(x), x\rangle - |1 \oplus f(x), x\rangle}{\sqrt{2}} \\
+\vspace{1 mm}\\
+&= \begin{cases}
+    \dfrac{|0, x\rangle - |1, x\rangle}{\sqrt{2}}  = (+1)|-,x\rangle \text{ \hspace{5 mm} if } f(x) = 0;\\
+    \vspace{1 mm}\\
+    \dfrac{|1, x\rangle - |0, x\rangle}{\sqrt{2}}  = (-1)|-,x\rangle \text{ \hspace{5 mm} if } f(x) = 1.
+\end{cases}
+\end{split}
+\end{equation}
 \vspace{1 mm}
 
 \noindent
-These two branches can be unified in the following way:
+These two branches can be unified, as we see in the following equation.
 
-$$U_f|-, x\rangle = (-1)^{f(x)}|-, x\rangle$$
-\vspace{-2 mm}
+\begin{equation}
+U_f|-, x\rangle = (-1)^{f(x)}|-, x\rangle
+\vspace{3 mm}
+\end{equation}
 
 \noindent
-Thus, we get a negative sign if $f(x) = 1$, and the state is unchanged if $f(x) = 0$. However, something interesting happens when we apply $U_f$ to the state $|-,+\rangle$, which is $|\psi_1\rangle$:
+Thus, we get a negative sign if $f(x) = 1$, and the state is unchanged if $f(x) = 0$. However, something interesting happens when we apply $U_f$ to the state $|-,+\rangle$, which is $|\psi_1\rangle$.
 
-$$|\psi_2\rangle = U_f|\psi_1\rangle = U_f|-, +\rangle $$
+\begin{equation}
+\begin{split}
+|\psi_2\rangle = U_f|\psi_1\rangle
+&= U_f|-, +\rangle \\
+\vspace{1 mm}\\
+&= \dfrac{U_f|-, 0\rangle + U_f|-, 1\rangle}{\sqrt{2}} \\
+\vspace{1 mm}\\
+&= \dfrac{(-1)^{f(0)}|-, 0\rangle + (-1)^{f(1)}|-, 1\rangle}{\sqrt{2}} \\
+\vspace{1 mm}\\
+&= |-\rangle \otimes \left( \dfrac{(-1)^{f(0)}|0\rangle + (-1)^{f(1)}|1\rangle}{\sqrt{2}}\right) \\
+\vspace{1 mm}\\
+&= \begin{cases}
+   \pm |-\rangle \otimes \left( \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right) = \pm |-,+\rangle \text{ \hspace{5 mm} if constant;} \\
+   \vspace{1 mm}\\
+   \pm |-\rangle \otimes \left( \dfrac{|0\rangle - |1\rangle}{\sqrt{2}}\right) = \pm |-,-\rangle \text{ \hspace{5 mm} if balanced.}
+\end{cases}
+\end{split}
+\end{equation}
 \vspace{1 mm}
-
-$$U_f|-, +\rangle = \dfrac{U_f|-, 0\rangle + U_f|-, 1\rangle}{\sqrt{2}} =  \dfrac{(-1)^{f(0)}|-, 0\rangle + (-1)^{f(1)}|-, 1\rangle}{\sqrt{2}}$$
-\vspace{1 mm}
-
-$$\dfrac{(-1)^{f(0)}|-, 0\rangle + (-1)^{f(1)}|-, 1\rangle}{\sqrt{2}} = |-\rangle \otimes \left[ \dfrac{(-1)^{f(0)}|0\rangle + (-1)^{f(1)}|1\rangle}{\sqrt{2}}\right]$$
-
-$$|-\rangle \otimes \left[ \dfrac{(-1)^{f(0)}|0\rangle + (-1)^{f(1)}|1\rangle}{\sqrt{2}}\right] =
-\begin{cases}
-   \pm |-\rangle \otimes \left[ \dfrac{|0\rangle + |1\rangle}{\sqrt{2}}\right] = \pm |-,+\rangle \text{ if constant} \\
-   \pm |-\rangle \otimes \left[ \dfrac{|0\rangle - |1\rangle}{\sqrt{2}}\right] = \pm |-,-\rangle \text{ if balanced}
-\end{cases}$$
-\vspace{2 mm}
 
 \noindent
 If $f(x)$ is balanced, this has the effect of changing the relative phase between the $|0\rangle$ and $|1\rangle$ components of qubit 0's state, which flips it from $|+\rangle$ to $|-\rangle$. This is interesting, because the action of our oracle on the computational basis state $|y,x\rangle$ is to change the state of qubit 1 and leave qubit 0 alone. But, when our qubits are in superposition states, the balanced oracle actually changes the state of qubit 0 (which is the control qubit in the oracle), and leaves alone the state of qubit 1 (which is the target qubit in the oracle).
@@ -534,12 +462,15 @@ If $f(x)$ is balanced, this has the effect of changing the relative phase betwee
 
 We know that the outcome of the previous step is to produce one of two superposition product states, $|-, +\rangle$ or $|-, -\rangle$. However, our goal is to query the Deutsch Oracle as few times as possible, and so although we can see that these states are different, we cannot distinguish them with a single measurement (as we only get a 0 or a 1). Therefore, we use the Hadamard gate to return to 2Q computational basis states that can be distinguished in one measurement.
 
-$$|\psi_3\rangle = (H \otimes H)|\psi_2\rangle =
+\begin{equation}
+|\psi_3\rangle = (H \otimes H)|\psi_2\rangle =
 \begin{cases}
-   \pm (H \otimes H)|-, +\rangle = \pm |10\rangle \text{ if constant}\\
-   \pm (H \otimes H)|-, -\rangle = \pm |11\rangle \text{ if balanced}
-\end{cases}$$
-\vspace{2 mm}
+   \pm (H \otimes H)|-, +\rangle = \pm |10\rangle \text{ \hspace{5 mm} if constant;}\\
+   \\
+   \pm (H \otimes H)|-, -\rangle = \pm |11\rangle \text{ \hspace{5 mm} if balanced.}
+\end{cases}
+\end{equation}
+\vspace{1 mm}
 
 \noindent
 Thus, we are in two distinct 2Q computational basis states, dependent on the nature of $f(x)$. We could then measure the state of qubit 0 one time, and we would immediately know the answer to whether $f(x)$ is constant or balanced.
