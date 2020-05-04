@@ -1,5 +1,5 @@
-stanford-cs269q
-===============
+Stanford CS 269Q: Quantum Computer Programming
+==============================================
 
 [![Binder](https://mybinder.org/badge_logo.svg)][binder]
 
